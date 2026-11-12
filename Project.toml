@@ -1,0 +1,24 @@
+name = "SignoriniPostprocessing"
+uuid = "ac7e5630-f756-491c-805d-14e94690f74d"
+version = "0.0.1"
+authors = ["Sergio Carrasco Hidalgo <sechidalgo7@gmail.com>"]
+
+[deps]
+FillArrays = "1a297f60-69ca-5386-bcde-b61e274b549b"
+Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[compat]
+FillArrays = "1"
+Gridap = "0.19.11"
+LinearAlgebra = "1"
+SparseArrays = "1"
+julia = "1.10"
+
+[extras]
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "Printf"]

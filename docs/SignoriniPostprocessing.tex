@@ -1,0 +1,227 @@
+% SignoriniPostprocessing.jl -- documentación.
+% Compilar (desde docs/):  latexmk -lualatex SignoriniPostprocessing.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{fontspec}
+\setmonofont{Menlo}[Scale=0.82]
+\usepackage[spanish,es-noshorthands]{babel}
+\unaccentedoperators
+\usepackage{amsmath,amssymb}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{booktabs,tabularx}
+\usepackage{xcolor}
+\usepackage{fancyvrb}
+\usepackage[hidelinks]{hyperref}
+
+\fvset{fontsize=\small,frame=single,framesep=2mm,rulecolor=\color{black!25}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\BDM}{\mathrm{BDM}}
+\newcommand{\Pk}[1]{\mathrm{P}_{#1}}
+\newcommand{\dive}{\operatorname{div}}
+
+\title{\texttt{SignoriniPostprocessing.jl}\\[2pt]
+  \large Signorini escalar en forma mixta y postproceso de Muga--Rojas--Vega}
+\date{Noviembre 2026}
+
+\begin{document}
+\maketitle
+
+\section{Problema y método}
+
+Dados $f$ y $u_D$, con $\partial\Omega=\Gamma_D\cup\Gamma_S$, se busca $(\sigma,u)$ tal que
+(Wang--Hu--Zhou~\cite{wang})
+\[
+  \sigma-\nabla u=0,\quad \dive\sigma+f=0 \ \text{en }\Omega,\qquad
+  u=u_D \ \text{en }\Gamma_D,\qquad
+  u\ge 0,\ \ \sigma\cdot n\ge 0,\ \ u\,(\sigma\cdot n)=0 \ \text{en }\Gamma_S .
+\]
+
+\paragraph{Discretización.} $\Sigma_h\times Q_h=\BDM_{k+1}\times\Pk{k}$ (discontinuo), $k\ge 0$.
+Sin multiplicador de Lagrange: $\sigma_h$ se busca en el cono convexo
+\[
+  K_h=\{\tau\in\Sigma_h:\ \text{todos los coeficientes de Bernstein de }
+  \tau\cdot n|_F \text{ son } \ge 0,\ \forall F\subset\Gamma_S\},
+\]
+y $(\sigma_h,u_h)\in K_h\times Q_h$ resuelve la desigualdad variacional
+\begin{align*}
+  (\sigma_h,\tau-\sigma_h)+(u_h,\dive(\tau-\sigma_h)) &\ge \langle u_D,(\tau-\sigma_h)\cdot n\rangle_{\Gamma_D}
+  && \forall\,\tau\in K_h,\\
+  (\dive\sigma_h,v) &= -(f,v) && \forall\,v\in Q_h .
+\end{align*}
+Por la propiedad de envolvente convexa, $K_h$ garantiza $\sigma_h\cdot n\ge0$ en todo punto de
+$\Gamma_S$; es exacto para $k=0$ (trazas lineales) y conservativo para $k\ge1$.
+
+\paragraph{Active set.} En cada faceta $F\subset\Gamma_S$ los $k+2$ grados de libertad de
+$\sigma_h\cdot n|_F$ se reparametrizan por sus coeficientes de Bernstein $c_{F,i}$
+($x=T\tilde x$). Cada $c_{F,i}$ está \emph{en contacto} (libre) o \emph{separado} ($c_{F,i}=0$).
+Con $\mu_{F,i}$ el multiplicador algebraico de $c_{F,i}\ge0$ (residuo del sistema completo,
+análogo discreto de $\int_F u\,B_i$), la actualización es
+\[
+  \text{contacto}\to\text{separado si } c_{F,i}<-\mathrm{tol}\,\|c\|_\infty,\qquad
+  \text{separado}\to\text{contacto si } \mu_{F,i}<-\mathrm{tol}\,\|\mu\|_\infty ,
+\]
+hasta que el conjunto no cambia. La matriz se ensambla una vez; cada iteración solo cambia $T$.
+
+\paragraph{Postproceso (§3.1 de~\cite{muga}).} Con $p=k+1$ y $q_h=-\sigma_h$ (el paper usa
+$q=-\nabla u$), en cada $K$ se resuelve: hallar
+$(\varepsilon_K,\nu_K)\in V^{p+2}_{\star,K}\times V^{p+1}_K$ tal que
+\begin{align*}
+  (\nabla\varepsilon_K,\nabla v)_K+(\nabla\nu_K,\nabla v)_K &= -(q_h,\nabla v)_K && \forall\,v\in V^{p+2}_{\star,K},\\
+  (\nabla w,\nabla\varepsilon_K)_K &= 0 && \forall\,w\in V^{p+1}_{\star,K},\\
+  (\nu_K,1)_K &= (u_h,1)_K .
+\end{align*}
+Las medias nulas se imponen con dos multiplicadores escalares por elemento; cada sistema local
+se resuelve en forma densa, sin ensamblaje global.
+
+\section{Estructura}
+
+\noindent
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+\toprule
+Archivo & Contenido \\
+\midrule
+\code{src/BernsteinTrace.jl}       & base de Bernstein en facetas (\code{bernstein\_transform}, \code{facet\_bernstein\_coeffs}) \\
+\code{src/ScalarSignorini.jl}      & cono $K_h$, transformación $T$, multiplicadores, \code{solve\_scalar\_signorini} \\
+\code{src/ResidualMinimization.jl} & sistemas locales (3.2), \code{residual\_minimization\_postprocess} \\
+\code{test/manufactured.jl}        & solución exacta, mallas (\code{LEVELS}), normas \\
+\code{studies/convergence/}        & exportación a CSV y gráficos log-log \\
+\bottomrule
+\end{tabularx}
+
+\section{Uso}
+
+\begin{Verbatim}
+using SignoriniPostprocessing, Gridap
+
+model  = simplexify(CartesianDiscreteModel((-0.5, 0.5, 0.0, 1.0), (32, 32)))
+labels = get_face_labeling(model)
+add_tag_from_tags!(labels, "GammaS", ["tag_5"])                    # y = 0
+add_tag_from_tags!(labels, "GammaD", ["tag_6", "tag_7", "tag_8"])  # resto
+
+f(x)  = 1.0
+uD(x) = x[2]
+
+k   = 1
+sol = solve_scalar_signorini(model; k, f, uD, tag_D = "GammaD", tag_S = "GammaS")
+sol.converged || error("el active set no convergió")
+
+pp = residual_minimization_postprocess(model, -sol.σh, sol.uh, k + 1)
+pp.νh    # postproceso, P_{k+2}
+pp.εh    # representante del residuo, P_{k+3}, media nula por elemento
+\end{Verbatim}
+
+\paragraph{\code{solve\_scalar\_signorini}.}
+Obligatorios: \code{model}, \code{k}, \code{f}, \code{uD}, \code{tag\_D}, \code{tag\_S}.
+Opcionales: \code{qdegree} $=2k+6$ (cuadratura), \code{maxit} $=100$,
+\code{tol} $=10^{-10}$ (guarda relativa de redondeo del active set),
+\code{init\_contact} $=$ \code{false} (estado inicial: todo separado).
+Devuelve un \code{NamedTuple} con, entre otros:
+\code{σh}, \code{uh} (\code{FEFunction}), \code{Ω}, \code{dΩ}, \code{ΓS}, \code{nS},
+\code{state} (por faceta, \code{true} $=$ contacto), \code{c} y \code{μ} (coeficientes de
+Bernstein de $\sigma_h\cdot n$ y multiplicadores por faceta), \code{it}, \code{converged},
+\code{ndofs}.
+
+\paragraph{\code{residual\_minimization\_postprocess}.}
+Argumentos \code{(model, qh, uh, p; qdegree)}: \code{qh} es el flujo en la convención del paper ($q_h\approx-\nabla u$), \code{p} el grado BDM.
+Devuelve \code{νh}, \code{εh} y sus espacios \code{Vν}, \code{Vε}. Sirve para cualquier par mixto
+$\BDM_p\times\Pk{p-1}$, no solo para Signorini.
+
+\section{Cómo resolver otro problema}
+
+\paragraph{Malla.} Cualquier \code{DiscreteModel} 2D de triángulos con facetas rectas, por
+ejemplo
+\begin{Verbatim}
+model = simplexify(CartesianDiscreteModel((a, b, c, d), (nx, ny)))
+model = GmshDiscreteModel("malla.msh")      # requiere GridapGmsh en el entorno
+\end{Verbatim}
+$\Gamma_D$ y $\Gamma_S$ se pasan como nombres de etiqueta (\code{add\_tag\_from\_tags!} o grupos
+físicos de Gmsh). Requisitos:
+$|\Gamma_D|>0$ y $\Gamma_D\cap\Gamma_S=\emptyset$. No hay frontera de Neumann: las facetas de
+$\partial\Omega$ sin etiqueta quedan con $u=0$ (condición natural de la forma mixta).
+
+\paragraph{Datos.} \code{f} y \code{uD} son funciones de un punto \code{x} (\code{x[1]}, \code{x[2]}).
+La convención es $\sigma=\nabla u$ con $u\ge0$, $\sigma\cdot n\ge0$ en $\Gamma_S$. Una
+restricción $u\ge g$ con $g\neq0$ no está implementada.
+
+\paragraph{Parámetros.} El grado \code{k} (probado para $k=0,\dots,3$). Si $f$ o $u_D$ varían
+fuertemente, aumentar \code{qdegree}. Si el active set no converge, revisar \code{it} y
+\code{ncontact} antes de aumentar \code{maxit}.
+
+\paragraph{Coeficientes de la EDP.} El código resuelve $-\Delta u=f$ (difusión unitaria) y no
+tiene argumento para un coeficiente. Para $-\dive(\kappa\nabla u)=f$ con $\sigma=\kappa\nabla u$
+hay que cambiar $(\sigma,\tau)$ por $(\kappa^{-1}\sigma,\tau)$ en la forma \code{a}
+(línea 227 de \code{ScalarSignorini.jl}) y $(\nabla\cdot,\nabla\cdot)_K$ por
+$(\kappa\nabla\cdot,\nabla\cdot)_K$ en \code{Aεε}, \code{Bεν}
+(líneas 78--79 de \code{ResidualMinimization.jl}). Ninguna de las dos variantes está implementada ni
+verificada.
+
+\paragraph{Tests y estudios.} Todo está en \code{test/manufactured.jl}: la solución exacta en
+las líneas 48--55 (\code{uex}, \code{σex} $=\nabla u$, \code{fex} $=-\Delta u$, consistentes
+entre sí y cumpliendo Signorini en $\Gamma_S$), el dominio y las etiquetas en
+\code{square\_model}, y las mallas por grado en \code{LEVELS} (línea 71). Las cotas de tasa de los tests suponen una
+solución suficientemente regular.
+
+\section{Superconvergencia en orden bajo ($\BDM_1\times\Pk0$)}
+
+El paper no excluye $p=1$: dice que para $p=1$ se gana \emph{un} orden en vez de dos, salvo si
+$f\in V_h^{p-1}$ (estimaciones (2.9) y (2.15) y su observación posterior; §4.1 con $f\notin\Pk0$
+frente a §4.2 con $f\equiv0$). El motivo está en la cota (2.11):
+\[
+  \|u-\nu_h\|_K \le \tfrac{h_K}{\pi}\bigl(\|q-q_h\|_K+\|\nabla(u-Q^{p+1}_Ku)\|_K\bigr)
+  +\|u_h-Q^{p-1}_Ku\|_K+\|u-Q^{p+1}_Ku\|_K .
+\]
+Todos los términos son $O(h^{p+2})$ salvo la supercercanía $\|u_h-Q^{p-1}_hu\|$, que se obtiene
+por dualidad (Stenberg~\cite{stenberg}; $\Omega$ convexo):
+\[
+  \|Q^{p-1}_hu-u_h\|\ \lesssim\ h\,\|q-q_h\| + h^{\min(p,2)}\,\|\dive(q-q_h)\|,
+  \qquad \dive(q-q_h)=f-Q^{p-1}_hf .
+\]
+El segundo término viene de $(\dive(q-q_h),\varphi-Q^{p-1}_h\varphi)$ con
+$\|\varphi-Q^{p-1}_h\varphi\|\lesssim h^{\min(p,2)}|\varphi|_2$:
+\begin{itemize}
+  \item $p\ge2$: $h^2\cdot O(h^{p})=O(h^{p+2})$, es decir, se ganan dos órdenes.
+  \item $p=1$, $f\notin\Pk0$: $h\cdot O(h)=O(h^2)$, es decir, se gana un orden. Es el caso de
+        §4.1 del paper.
+  \item $p=1$, $f\in\Pk0$: $\dive q_h=f$ exactamente, el término desaparece y queda
+        $h\,\|q-q_h\|=O(h^3)$, es decir, se ganan dos órdenes.
+\end{itemize}
+En el benchmark de los tests $f=-2$ es constante, así que $\dive\sigma_h=-f$ exactamente (el
+test lo verifica) y $k=0$ cae en el tercer caso. Para comprobarlo, se repitió el cálculo
+cambiando el término $y^2$ de la solución exacta por $y^2\cos(\pi x)$, que no altera las
+condiciones en $\Gamma_S$ y da $f=(\pi^2y^2-2)\cos(\pi x)\notin\Pk0$:
+
+\begin{center}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+$f$ & $k$ & tasas $\|u-u_h\|$ & tasas $\|u-\nu_h\|$ \\
+\midrule
+$-2\in\Pk0$                          & 0 & 0.99,\ 1.00,\ 1.00 & 2.95,\ 2.97,\ 2.99 \\
+$(\pi^2y^2-2)\cos(\pi x)\notin\Pk0$  & 0 & 0.98,\ 1.00,\ 1.00 & 2.39,\ 2.21,\ 2.11 \\
+$(\pi^2y^2-2)\cos(\pi x)\notin\Pk0$  & 1 & 1.94,\ 1.98,\ 2.00 & 4.01,\ 4.00,\ 4.00 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\noindent Mallas $n=8,\dots,64$ ($k=0$) y $n=4,\dots,32$ ($k=1$). Con $f\notin\Pk0$, $k=0$ baja a
+orden 2 y $k\ge1$ no cambia, tal como predice el paper. La teoría es para el problema lineal;
+para Signorini es una observación numérica en un caso favorable (solución suave y frontera
+libre sobre un vértice de la malla).
+
+\section{Ejecución}
+
+Desde la raíz del paquete:
+\begin{Verbatim}
+julia --project=. -e 'using Pkg; Pkg.test()'         # tests (~1 min)
+julia --project=. studies/convergence/export_csv.jl  # -> results/csv/
+python3 studies/convergence/plot_convergence.py      # -> results/pdf/
+\end{Verbatim}
+
+\begin{thebibliography}{9}
+\bibitem{muga} I.~Muga, S.~Rojas, P.~Vega. An adaptive superconvergent mixed finite element
+  method based on local residual minimization. \emph{SIAM J.\ Numer.\ Anal.} 61(5):2084--2105, 2023.
+\bibitem{wang} Q.~Wang, J.~Hu, G.~Zhou. The mixed method with two Lagrange multiplier
+  formulations for the Signorini problem. \emph{J.\ Comput.\ Appl.\ Math.} 452:116115, 2024.
+\bibitem{stenberg} R.~Stenberg. Postprocessing schemes for some mixed finite elements.
+  \emph{RAIRO Modél.\ Math.\ Anal.\ Numér.} 25(1):151--167, 1991.
+\end{thebibliography}
+
+\end{document}
