@@ -35,6 +35,9 @@ Dados $f$ y $u_D$, con $\partial\Omega=\Gamma_D\cup\Gamma_S$, se busca $(\sigma,
   u=u_D \ \text{en }\Gamma_D,\qquad
   u\ge 0,\ \ \sigma\cdot n\ge 0,\ \ u\,(\sigma\cdot n)=0 \ \text{en }\Gamma_S .
 \]
+Opcionalmente: un término de reacción $-\dive\sigma+c\,u=f$ (Führer--Heuer--Stephan~\cite{fhs}),
+un obstáculo $u\ge\chi$, $(u-\chi)\,\sigma\cdot n=0$ en $\Gamma_S$, una frontera de Neumann
+$\Gamma_N$ con $\sigma\cdot n=g$ (Bartels--Gudi--Kaltenbach~\cite{bgk}), y $\Gamma_D$ puede faltar.
 
 \paragraph{Discretización.} $\Sigma_h\times Q_h=\BDM_{k+1}\times\Pk{k}$ (discontinuo), $k\ge 0$.
 Sin multiplicador de Lagrange: $\sigma_h$ se busca en el cono convexo
@@ -48,6 +51,9 @@ y $(\sigma_h,u_h)\in K_h\times Q_h$ resuelve la desigualdad variacional
   && \forall\,\tau\in K_h,\\
   (\dive\sigma_h,v) &= -(f,v) && \forall\,v\in Q_h .
 \end{align*}
+Con los datos opcionales se agrega $-(c\,u_h,v)$ a la segunda ecuación y
+$\langle\chi,(\tau-\sigma_h)\cdot n\rangle_{\Gamma_S}$ al lado derecho de la primera, y
+$\sigma_h\cdot n=g$ se impone de forma esencial en $\Gamma_N$.
 Por la propiedad de envolvente convexa, $K_h$ garantiza $\sigma_h\cdot n\ge0$ en todo punto de
 $\Gamma_S$; es exacto para $k=0$ (trazas lineales) y conservativo para $k\ge1$.
 
@@ -83,8 +89,12 @@ Archivo & Contenido \\
 \code{src/BernsteinTrace.jl}       & base de Bernstein en facetas (\code{bernstein\_transform}, \code{facet\_bernstein\_coeffs}) \\
 \code{src/ScalarSignorini.jl}      & cono $K_h$, transformación $T$, multiplicadores, \code{solve\_scalar\_signorini} \\
 \code{src/ResidualMinimization.jl} & sistemas locales (3.2), \code{residual\_minimization\_postprocess} \\
+\code{src/StenbergPostprocess.jl}  & postproceso (2.10), \code{stenberg\_postprocess} ($=\nu_h$, Prop.~3.1) \\
+\code{src/Estimators.jl}           & estimador a posteriori (sección~\ref{sec:est}), \code{contact\_estimator} \\
 \code{test/manufactured.jl}        & solución exacta, mallas (\code{LEVELS}), normas \\
-\code{studies/convergence/}        & exportación a CSV y gráficos log-log \\
+\code{studies/}                    & estudios: \code{convergence}, \code{aposteriori}, \code{adaptivity},
+                                     \code{references} (ejemplos de \cite{fhs,bgk}), \code{estimators};
+                                     CSV en \code{results/csv/}, PDF en \code{results/pdf/} \\
 \bottomrule
 \end{tabularx}
 
@@ -108,10 +118,16 @@ sol.converged || error("el active set no convergió")
 pp = residual_minimization_postprocess(model, -sol.σh, sol.uh, k + 1)
 pp.νh    # postproceso, P_{k+2}
 pp.εh    # representante del residuo, P_{k+3}, media nula por elemento
+
+est = contact_estimator(model, sol, pp.νh, pp.εh; k, uD, tag_D = "GammaD")
+est.η2   # η_K² por elemento (para marcar);  est.parts: cada término sumado
 \end{Verbatim}
 
 \paragraph{\code{solve\_scalar\_signorini}.}
-Obligatorios: \code{model}, \code{k}, \code{f}, \code{uD}, \code{tag\_D}, \code{tag\_S}.
+Obligatorios: \code{model}, \code{k}, \code{f}, \code{tag\_S}.
+Datos opcionales: \code{uD}, \code{tag\_D} (Dirichlet), \code{reaction} $=c\ge0$,
+\code{χ} (obstáculo, función de \code{x}), \code{tag\_N} y \code{gN} (Neumann; \code{gN} es un
+campo vectorial cuya traza normal es $g$).
 Opcionales: \code{qdegree} $=2k+6$ (cuadratura), \code{maxit} $=100$,
 \code{tol} $=10^{-10}$ (guarda relativa de redondeo del active set),
 \code{init\_contact} $=$ \code{false} (estado inicial: todo separado).
@@ -135,31 +151,102 @@ model = simplexify(CartesianDiscreteModel((a, b, c, d), (nx, ny)))
 model = GmshDiscreteModel("malla.msh")      # requiere GridapGmsh en el entorno
 \end{Verbatim}
 $\Gamma_D$ y $\Gamma_S$ se pasan como nombres de etiqueta (\code{add\_tag\_from\_tags!} o grupos
-físicos de Gmsh). Requisitos:
-$|\Gamma_D|>0$ y $\Gamma_D\cap\Gamma_S=\emptyset$. No hay frontera de Neumann: las facetas de
-$\partial\Omega$ sin etiqueta quedan con $u=0$ (condición natural de la forma mixta).
+físicos de Gmsh). Si $\Gamma_D$, $\Gamma_S$, $\Gamma_N$ no vienen como etiquetas, se crean
+por la posición del punto medio de cada faceta (\code{tag\_boundary\_facets!} en
+\code{studies/references/reference\_examples.jl}). Las etiquetas pasan a las mallas refinadas.
+Requisitos: $\Gamma_D$, $\Gamma_S$, $\Gamma_N$ disjuntos, y el problema bien planteado
+($|\Gamma_D|>0$ o $c>0$). Las facetas de $\partial\Omega$ sin etiqueta quedan con $u=0$
+(condición natural de la forma mixta). Mallas armadas a mano: los vértices de cada triángulo en
+orden creciente (\code{Oriented()}), como exigen los espacios BDM de Gridap.
 
-\paragraph{Datos.} \code{f} y \code{uD} son funciones de un punto \code{x} (\code{x[1]}, \code{x[2]}).
-La convención es $\sigma=\nabla u$ con $u\ge0$, $\sigma\cdot n\ge0$ en $\Gamma_S$. Una
-restricción $u\ge g$ con $g\neq0$ no está implementada.
+\paragraph{Datos.} \code{f}, \code{uD}, \code{χ} son funciones de un punto \code{x}
+(\code{x[1]}, \code{x[2]}). La convención es $\sigma=\nabla u$ con $u\ge\chi$, $\sigma\cdot n\ge0$
+en $\Gamma_S$.
 
 \paragraph{Parámetros.} El grado \code{k} (probado para $k=0,\dots,3$). Si $f$ o $u_D$ varían
 fuertemente, aumentar \code{qdegree}. Si el active set no converge, revisar \code{it} y
 \code{ncontact} antes de aumentar \code{maxit}.
 
-\paragraph{Coeficientes de la EDP.} El código resuelve $-\Delta u=f$ (difusión unitaria) y no
-tiene argumento para un coeficiente. Para $-\dive(\kappa\nabla u)=f$ con $\sigma=\kappa\nabla u$
-hay que cambiar $(\sigma,\tau)$ por $(\kappa^{-1}\sigma,\tau)$ en la forma \code{a}
-(línea 227 de \code{ScalarSignorini.jl}) y $(\nabla\cdot,\nabla\cdot)_K$ por
-$(\kappa\nabla\cdot,\nabla\cdot)_K$ en \code{Aεε}, \code{Bεν}
-(líneas 78--79 de \code{ResidualMinimization.jl}). Ninguna de las dos variantes está implementada ni
-verificada.
+\paragraph{Coeficientes de la EDP.} Hay reacción constante (\code{reaction}); la difusión es
+unitaria. Para $-\dive(\kappa\nabla u)=f$ con $\sigma=\kappa\nabla u$ habría que cambiar
+$(\sigma,\tau)$ por $(\kappa^{-1}\sigma,\tau)$ en la forma \code{a} de \code{ScalarSignorini.jl}
+y $(\nabla\cdot,\nabla\cdot)_K$ por $(\kappa\nabla\cdot,\nabla\cdot)_K$ en \code{Aεε},
+\code{Bεν} de \code{ResidualMinimization.jl}; no está implementado ni verificado.
 
 \paragraph{Tests y estudios.} Todo está en \code{test/manufactured.jl}: la solución exacta en
 las líneas 48--55 (\code{uex}, \code{σex} $=\nabla u$, \code{fex} $=-\Delta u$, consistentes
 entre sí y cumpliendo Signorini en $\Gamma_S$), el dominio y las etiquetas en
 \code{square\_model}, y las mallas por grado en \code{LEVELS} (línea 71). Las cotas de tasa de los tests suponen una
 solución suficientemente regular.
+
+\section{Estimador a posteriori}\label{sec:est}
+
+\code{contact\_estimator} calcula, con $q_h=-\sigma_h$ y $\beta_F=\sum_{i\text{ en contacto}}B_i$
+(partición de la unidad de Bernstein restringida a los coeficientes de $\sigma_h\cdot n|_F$ que el
+active set dejó en contacto),
+\begin{align*}
+  \eta_K^2 ={}& \|\nabla\varepsilon_K\|_K^2 + \|\sigma_h-\nabla\nu_h\|_K^2
+   + \tfrac12\!\!\sum_{F\subset\partial K\setminus\partial\Omega}\!\! h_F^{-1}\|[\![\nu_h]\!]\|_F^2
+   + \!\!\sum_{F\subset\partial K\cap\Gamma_D}\!\! h_F^{-1}\|u_D-\nu_h\|_F^2 \\
+  &+ \sum_{F\subset\partial K\cap\Gamma_S}\Bigl( h_F^{-1}\|\beta_F^{1/2}(\nu_h-\chi)\|_F^2
+     + h_F^{-1}\|(1-\beta_F)^{1/2}\min(\nu_h-\chi,0)\|_F^2 \Bigr).
+\end{align*}
+La primera línea es el estimador mejorado (3.9) de~\cite{muga}. En $\Gamma_S$ la traza de $u$ es
+desconocida y el término de Dirichlet se reemplaza por: $u=\chi$ donde hay contacto y solo la
+violación de $u\ge\chi$ donde hay separación. No usa la ecuación de momentum (no hay residuo
+$f-\dive q_h$). No hace falta un término para el signo de $\sigma_h\cdot n$: el cono da
+$\sigma_h\cdot n\ge0$ en todo punto. En $\Gamma_N$ no hay término. La confiabilidad para la
+desigualdad variacional no está demostrada; aun para el problema lineal, el Teorema 3.9 de
+\cite{muga} la da bajo la hipótesis de saturación (Hipótesis 3.5), con constante $1/(1-\delta)$.
+
+\paragraph{Elección del término de contacto.} {\sloppy Sobre las mismas soluciones, con $f$ constante
+(\code{contact\_terms.jl} en \code{studies/estimators/}), se compararon variantes del término en $\Gamma_S$:
+sin término; clasificación por faceta completa (en vez de $\beta_F$); clasificación por
+$\sigma_h\cdot n>0$; agregar $|\langle\sigma_h\cdot n,\nu_h-\chi\rangle_F|$; agregar
+$h_F\|\sigma_h\cdot n\|^2$ donde $\nu_h>\chi$. La elegida es la que más mejora sobre no tener
+término sin volverse inestable (la clasificación por faceta completa también mejora, menos): la
+complementariedad no es cuadrática en el error y sobreestima al crecer $k$ (hasta $\sim\!50$), el
+flujo donde $\nu_h>\chi$ sobreestima $10^2$--$10^7$, y la clasificación por signo de
+$\sigma_h\cdot n$ es ruidosa cerca de la transición. El término de contacto sigue al error de
+borde en la zona de contacto: su cociente está entre $0.97$ y $2.2$.\par}
+
+\paragraph{Efectividad observada.} Contra la norma del Teorema 3.9,
+$E_s^2=\|\sigma-\sigma_h\|^2+\|\nabla_h(u-\nu_h)\|^2+\sum_{F\text{ int}}h_F^{-1}\|[\![\nu_h]\!]\|_F^2
++\sum_{F\subset\Gamma_D\cup\text{contacto}}h_F^{-1}\|u-\nu_h\|_F^2$ (el término de borde solo donde
+la traza de $u$ está prescrita), última década de $N$, $k=0,\dots,3$:
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+ejemplo & $\eta/E_s$ adaptativo & $\eta/E_s$ uniforme & $\tilde\eta/E$ adaptativo \\
+\midrule
+transición en vértice, $f\in\Pk0$          & 0.67--1.03 & 0.64--0.73 & 0.31--0.75 \\
+\quad la misma $u$ sin contacto            & 0.67--1.03 & 0.64--0.73 & -- \\
+transición dentro de faceta, $f\in\Pk0$    & 0.67--1.02 & 0.47--0.83 & 0.31--0.73 \\
+\quad la misma $u$ sin contacto            & 0.68--1.03 & 0.63--0.76 & -- \\
+Bartels §7.2, $f\notin\Pk{k}$              & 0.20--0.32 & 0.35--0.73 & 0.08--0.17 \\
+\bottomrule
+\end{tabular}
+\end{center}
+``Sin contacto'' es el problema lineal con la misma $u$ y Dirichlet en todo $\partial\Omega$
+(\code{linear\_check.jl} en \code{studies/estimators/}). Dos cuestiones quedan abiertas:
+\begin{itemize}
+  \item \emph{Transición dentro de una faceta.} Con refinamiento uniforme la efectividad baja y
+        oscila también sin contacto (por nivel, $0.49$--$0.76$ frente a $0.64$--$0.73$ con la
+        transición en un vértice): parte de la pérdida viene de que la singularidad cae dentro de
+        un elemento, no del contacto. Con $k\ge1$ Signorini pierde además un 10--30\,\% respecto
+        del problema lineal (por ejemplo, $k=3$: $0.41$--$0.50$ frente a $0.49$--$0.67$); esa parte
+        es propia del contacto y ninguna de las variantes probadas la capta. Dónde se localiza ese
+        error no está determinado. Con refinamiento adaptativo Signorini y el problema lineal
+        coinciden para $k\le2$; con $k=3$ Signorini baja hasta $0.67$ (el lineal, hasta $0.77$).
+  \item \emph{$f\notin\Pk{k}$.} La efectividad baja en las mallas adaptativas y con $k=0$, pero no
+        con refinamiento uniforme y $k\ge2$ ($0.71$--$0.73$ en Bartels §7.2). Es compatible con el
+        Teorema 3.9: en ese ejemplo $\delta\approx0.93$--$0.99$ (medido en las corridas guiadas por
+        $\tilde\eta$), y la constante $1/(1-\delta)$ es grande. Con $k=0$ la oscilación
+        $h_K\|f-\Pi_kf\|_K$ tiene el tamaño del error ($\approx1.1\,E_s$); con $k\ge1$ en
+        adaptativo es $2$--$4$ veces mayor, así que no explica por sí sola lo que falta. La causa
+        no está establecida.
+\end{itemize}
 
 \section{Superconvergencia en orden bajo ($\BDM_1\times\Pk0$)}
 
@@ -210,10 +297,17 @@ libre sobre un vértice de la malla).
 
 Desde la raíz del paquete:
 \begin{Verbatim}
-julia --project=. -e 'using Pkg; Pkg.test()'         # tests (~1 min)
-julia --project=. studies/convergence/export_csv.jl  # -> results/csv/
-python3 studies/convergence/plot_convergence.py      # -> results/pdf/
+julia --project=. -e 'using Pkg; Pkg.test()'                  # tests (~1 min)
+julia --project=. studies/convergence/export_csv.jl           # convergencia
+julia --project=. studies/aposteriori/estimator_study.jl      # η̃ vs problema lineal
+julia --project=. studies/adaptivity/adaptive_study.jl        # adaptividad (--bench, --problem)
+julia --project=. studies/references/reference_examples.jl    # ejemplos de [4, 5]
+julia --project=. studies/estimators/compare_estimators.jl    # η vs η̃
+julia --project=. studies/estimators/contact_terms.jl         # variantes del término de contacto
+julia --project=. studies/estimators/linear_check.jl          # η sin contacto (misma u)
+python3 studies/<estudio>/plot_*.py                           # -> results/pdf/0*_*/
 \end{Verbatim}
+El índice de los PDF está en \code{results/pdf/README.md}.
 
 \begin{thebibliography}{9}
 \bibitem{muga} I.~Muga, S.~Rojas, P.~Vega. An adaptive superconvergent mixed finite element
@@ -222,6 +316,10 @@ python3 studies/convergence/plot_convergence.py      # -> results/pdf/
   formulations for the Signorini problem. \emph{J.\ Comput.\ Appl.\ Math.} 452:116115, 2024.
 \bibitem{stenberg} R.~Stenberg. Postprocessing schemes for some mixed finite elements.
   \emph{RAIRO Modél.\ Math.\ Anal.\ Numér.} 25(1):151--167, 1991.
+\bibitem{fhs} T.~Führer, N.~Heuer, E.~P.~Stephan. On the DPG method for Signorini problems.
+  arXiv:1609.00765, 2016.
+\bibitem{bgk} S.~Bartels, T.~Gudi, A.~Kaltenbach. A priori and a posteriori error identities for
+  the scalar Signorini problem. arXiv:2407.10912, 2024.
 \end{thebibliography}
 
 \end{document}

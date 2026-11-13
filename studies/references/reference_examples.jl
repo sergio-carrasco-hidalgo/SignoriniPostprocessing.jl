@@ -264,6 +264,8 @@ function parse_args(args)
   exs, ks, nmax
 end
 
+# Main block only when run as a script (studies/estimators includes this file).
+if abspath(PROGRAM_FILE) == @__FILE__
 let (exs, ks, nmax) = parse_args(ARGS)
   outdir = joinpath(ROOT, "results", "csv", "references");  mkpath(outdir)
   t0 = time();  summary = []
@@ -292,4 +294,5 @@ let (exs, ks, nmax) = parse_args(ARGS)
     end
   end
   println("\ndone in ", round(time() - t0; digits = 1), " s")
+end
 end

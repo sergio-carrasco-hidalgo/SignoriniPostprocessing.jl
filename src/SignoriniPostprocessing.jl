@@ -14,6 +14,8 @@ Submodules
                             coefficient-wise active-set solver.
   * `ResidualMinimization`  the local mixed problems (3.2) giving ν_h and ε_h.
   * `StenbergPostprocess`   the local problems (2.10) giving ũ_h (= ν_h, Prop. 3.1).
+  * `Estimators`            a posteriori indicators: (3.9) of Muga–Rojas–Vega plus
+                            terms for the contact boundary (PDE-independent).
 """
 module SignoriniPostprocessing
 
@@ -21,18 +23,21 @@ include("BernsteinTrace.jl")
 include("ScalarSignorini.jl")
 include("ResidualMinimization.jl")
 include("StenbergPostprocess.jl")
+include("Estimators.jl")
 
 using .BernsteinTrace
 using .ScalarSignorini
 using .ResidualMinimization
 using .StenbergPostprocess
+using .Estimators
 
-export BernsteinTrace, ScalarSignorini, ResidualMinimization, StenbergPostprocess
+export BernsteinTrace, ScalarSignorini, ResidualMinimization, StenbergPostprocess, Estimators
 
 export bernstein_nodes, bernstein_transform, bernstein_basis, facet_bernstein_coeffs
 export SignoriniFacets, signorini_facets, cone_transform, cone_multipliers,
        solve_scalar_signorini
 export residual_minimization_postprocess
 export stenberg_postprocess
+export contact_estimator
 
 end # module SignoriniPostprocessing
